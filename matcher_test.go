@@ -67,11 +67,7 @@ func TestMatch(t *testing.T) {
 	}
 }
 
-func BenchmarkMatch(b *testing.B) {
-	// BenchmarkMatch-12    	  119523	      8417 ns/op	      10 B/op	       0 allocs/op
-	// BenchmarkMatch-12    	  119698	      9273 ns/op	      10 B/op	       0 allocs/op
-	// BenchmarkMatch-12    	  177430	      6253 ns/op	       7 B/op	       0 allocs/op
-
+func BenchmarkMatchWithProfile(b *testing.B) {
 	f, err := os.Create("cpu.profile")
 	if err != nil {
 		log.Fatal(err)
@@ -82,11 +78,13 @@ func BenchmarkMatch(b *testing.B) {
 		log.Fatal(err)
 	}
 
-	defer func() {
-		pprof.StopCPUProfile()
-		_ = f.Close()
-	}()
+	BenchmarkMatch(b)
 
+	pprof.StopCPUProfile()
+	f.Close()
+}
+
+func BenchmarkMatch(b *testing.B) {
 	matcher := NewMatcher(
 		"I love trees",
 		"bananas are the best fruit",
