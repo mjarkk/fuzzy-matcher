@@ -48,6 +48,8 @@ type Matcher struct {
 	letterCount map[byte]uint16
 }
 
+// NewMatcher creates a new matcher that can be used to match
+// Note that this method takes time as it optimized the input sentences to be fast to match
 func NewMatcher(sentences ...string) *Matcher {
 	m := &Matcher{
 		sentences:   make([]*Sentence, len(sentences)),
@@ -225,6 +227,7 @@ listsLoop:
 	return potentialWordIndex
 }
 
+// Match matches the inStr against the matcher inputs and returns the best matching string or -1 if nothing could be matched
 func (m *Matcher) Match(inStr string) int {
 	in := s2b(inStr)
 	currentWordLen := uint8(0)
