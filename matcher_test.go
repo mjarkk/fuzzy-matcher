@@ -56,7 +56,7 @@ func TestMatch(t *testing.T) {
 	}{
 		{-1, "nothing"},
 		{0, "i love trees"},
-		{1, "bananas are the best fruit"},
+		{2, "bananas are the best fruit"},
 		{2, "banana"},
 		{0, "do you also love trees? i do."},
 		{2, "on a sunday afternoon i like to eat a banana"},
@@ -70,6 +70,7 @@ func TestMatch(t *testing.T) {
 func BenchmarkMatch(b *testing.B) {
 	// BenchmarkMatch-12    	  119523	      8417 ns/op	      10 B/op	       0 allocs/op
 	// BenchmarkMatch-12    	  119698	      9273 ns/op	      10 B/op	       0 allocs/op
+	// BenchmarkMatch-12    	  177430	      6253 ns/op	       7 B/op	       0 allocs/op
 
 	f, err := os.Create("cpu.profile")
 	if err != nil {

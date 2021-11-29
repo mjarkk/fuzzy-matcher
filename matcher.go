@@ -31,6 +31,9 @@ type Sentence struct {
 	testMatched  uint64
 	wordsWithLen [255]*wordsListWithLen
 	minWordLen   uint8
+
+	// Used by matcher
+	matchedWordsIndex uint64
 }
 
 type wordsListWithLen struct {
@@ -149,90 +152,106 @@ func (m *Matcher) clearLetterCount() {
 	}
 }
 
-func (s *Sentence) Match(m *Matcher, in []byte) bool {
-	currentWordLen := uint8(0)
-	matchedWordsIdx := uint64(0)
+func (s *Sentence) wordMatch(m *Matcher, wordLen uint8) uint64 {
+	if wordLen < s.minWordLen {
+		return 0
+	}
 
-	doMatch := func() {
-		if currentWordLen == 0 {
-			return
+	wordsListsToMatchWith := []*wordsListWithLen{
+		s.wordsWithLen[wordLen],
+		s.wordsWithLen[wordLen-1],
+		s.wordsWithLen[wordLen+1],
+	}
+
+	// Contains either
+	// Null if no words matched
+	// The index of a exact match
+	// The indexes of all the words that somewhat matched
+	potentialWordIndex := uint64(0)
+
+listsLoop:
+	for _, list := range wordsListsToMatchWith {
+		if list == nil {
+			continue
 		}
-		if currentWordLen < s.minWordLen {
-			m.clearLetterCount()
-			currentWordLen = 0
-			return
-		}
 
-		wordsListsToMatchWith := []*wordsListWithLen{
-			s.wordsWithLen[currentWordLen],
-			s.wordsWithLen[currentWordLen-1],
-			s.wordsWithLen[currentWordLen+1],
-		}
-
-		// Contains either
-		// Null if no words matched
-		// The index of a exact match
-		// The indexes of all the words that somewhat matched
-		potentialWordIndex := uint64(0)
-
-	listsLoop:
-		for _, list := range wordsListsToMatchWith {
-			if list == nil {
-				continue
-			}
-
-			if list.allowedOff == 0 {
-			allowedOffsetZeroWordsLoop:
-				for _, word := range list.list {
-					for letter, letterCount := range word.lettersWithCount {
-						if m.letterCount[letter] != letterCount {
-							continue allowedOffsetZeroWordsLoop
-						}
+		if list.allowedOff == 0 {
+		allowedOffsetZeroWordsLoop:
+			for _, word := range list.list {
+				for letter, letterCount := range word.lettersWithCount {
+					if m.letterCount[letter] != letterCount {
+						continue allowedOffsetZeroWordsLoop
 					}
+				}
+				potentialWordIndex = word.wordIdx
+				break listsLoop
+			}
+		} else {
+		wordsLoop:
+			for _, word := range list.list {
+				// off contains the word offset from the currently inspecting word
+				var off uint16
+				for letter, letterCount := range word.lettersWithCount {
+					currentWordLetterCount := m.letterCount[letter]
+					if currentWordLetterCount == letterCount {
+						continue
+					} else if letterCount > currentWordLetterCount {
+						off += letterCount - currentWordLetterCount
+					} else {
+						off += currentWordLetterCount - letterCount
+					}
+					if off > list.allowedOff {
+						continue wordsLoop
+					}
+				}
+				if off == 0 {
+					// We found an exact match!
+					// As potentialWordIndex is ORed to the matchedWordsIdx later on we write the word index in
+					// there so later on the index gets ORed to the matchedWordsIdx
 					potentialWordIndex = word.wordIdx
 					break listsLoop
 				}
-			} else {
-			wordsLoop:
-				for _, word := range list.list {
-					// off contains the word offset from the currently inspecting word
-					var off uint16
-					for letter, letterCount := range word.lettersWithCount {
-						currentWordLetterCount := m.letterCount[letter]
-						if currentWordLetterCount == letterCount {
-							continue
-						} else if letterCount > currentWordLetterCount {
-							off += letterCount - currentWordLetterCount
-						} else {
-							off += currentWordLetterCount - letterCount
-						}
-						if off > list.allowedOff {
-							continue wordsLoop
-						}
-					}
-					if off == 0 {
-						// We found an exact match!
-						// As potentialWordIndex is ORed to the matchedWordsIdx later on we write the word index in
-						// there so later on the index gets ORed to the matchedWordsIdx
-						potentialWordIndex = word.wordIdx
-						break listsLoop
-					}
-					potentialWordIndex |= word.wordIdx
-				}
-			}
-
-			if potentialWordIndex != 0 {
-				// Break the loop early if we have some potential matches
-				// Don't waist cpu cycles
-				break
+				potentialWordIndex |= word.wordIdx
 			}
 		}
 
-		matchedWordsIdx |= potentialWordIndex
+		if potentialWordIndex != 0 {
+			// Break the loop early if we have some potential matches
+			// Don't waist cpu cycles
+			break
+		}
+	}
 
-		// Revert matching changes
+	return potentialWordIndex
+}
+
+func (m *Matcher) Match(inStr string) int {
+	in := s2b(inStr)
+	currentWordLen := uint8(0)
+	result := -1
+
+	for _, s := range m.sentences {
+		s.matchedWordsIndex = 0
+	}
+
+	doMatch := func() bool {
+		if currentWordLen == 0 {
+			return false
+		}
+
+		for idx, sentence := range m.sentences {
+			sentence.matchedWordsIndex |= sentence.wordMatch(m, currentWordLen)
+			if sentence.matchedWordsIndex == sentence.testMatched {
+				m.clearLetterCount()
+				currentWordLen = 0
+				result = idx
+				return true
+			}
+		}
+
 		m.clearLetterCount()
 		currentWordLen = 0
+		return false
 	}
 
 	for _, c := range in {
@@ -248,24 +267,12 @@ func (s *Sentence) Match(m *Matcher, in []byte) bool {
 				if currentWordLen != 253 {
 					currentWordLen++
 				}
-			} else if currentWordLen > 0 {
-				doMatch()
+			} else if currentWordLen > 0 && doMatch() {
+				return result
 			}
 		}
 	}
 
 	doMatch()
-
-	return matchedWordsIdx == s.testMatched
-}
-
-func (m *Matcher) Match(inStr string) int {
-	in := s2b(inStr)
-	for idx, sentence := range m.sentences {
-		if sentence.Match(m, in) {
-			return idx
-		}
-	}
-
-	return -1
+	return result
 }
