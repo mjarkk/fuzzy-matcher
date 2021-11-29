@@ -45,15 +45,14 @@ type Matcher struct {
 	sentences []*Sentence
 
 	// Used by matcher
-	letterCount map[byte]uint16
+	letterCount [256]uint16
 }
 
 // NewMatcher creates a new matcher that can be used to match
 // Note that this method takes time as it optimized the input sentences to be fast to match
 func NewMatcher(sentences ...string) *Matcher {
 	m := &Matcher{
-		sentences:   make([]*Sentence, len(sentences)),
-		letterCount: map[byte]uint16{},
+		sentences: make([]*Sentence, len(sentences)),
 	}
 
 	for idx, sentence := range sentences {
@@ -147,11 +146,7 @@ func NewMatcher(sentences ...string) *Matcher {
 }
 
 func (m *Matcher) clearLetterCount() {
-	if len(m.letterCount) != 0 {
-		for k := range m.letterCount {
-			delete(m.letterCount, k)
-		}
-	}
+	m.letterCount = [256]uint16{}
 }
 
 func (s *Sentence) wordMatch(m *Matcher, wordLen uint8) uint64 {
