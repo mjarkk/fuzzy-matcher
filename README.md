@@ -26,7 +26,7 @@ goos: darwin
 goarch: amd64
 pkg: github.com/mjarkk/fuzzy-matcher
 cpu: Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
-BenchmarkMatch-12   357168  3155 ns/op  0 B/op  0 allocs/op
+BenchmarkMatch-12   1792627 657.8 ns/op 0 B/op  0 allocs/op
 ```
 
 Test code can be found in [matcher_test.go](https://github.com/mjarkk/fuzzy-matcher/blob/main/matcher_test.go)

@@ -11,15 +11,20 @@ type wordEntry struct {
 	wordIdx uint64
 
 	word             []byte
-	lettersWithCount map[byte]uint16
+	lettersWithCount []letter
 	wordLen          uint8
+}
+
+type letter struct {
+	letter byte
+	count  uint16
 }
 
 func newWordEntry() wordEntry {
 	return wordEntry{
 		wordIdx:          0,
 		word:             []byte{},
-		lettersWithCount: map[byte]uint16{},
+		lettersWithCount: []letter{},
 		wordLen:          0,
 	}
 }
@@ -72,7 +77,22 @@ func NewMatcher(sentences ...string) *Matcher {
 					if currentWord.wordLen < 254 {
 						currentWord.wordLen++
 					}
-					currentWord.lettersWithCount[c]++
+
+					foundLetter := false
+					for idx, letter := range currentWord.lettersWithCount {
+						if letter.letter == c {
+							letter.count++
+							currentWord.lettersWithCount[idx] = letter
+							foundLetter = true
+							break
+						}
+					}
+					if !foundLetter {
+						currentWord.lettersWithCount = append(currentWord.lettersWithCount, letter{
+							letter: c,
+							count:  1,
+						})
+					}
 					currentWord.word = append(currentWord.word, c)
 					wordsWithCounter[lastWordIdx] = currentWord
 				} else if c < utf8.RuneSelf {
@@ -175,8 +195,8 @@ listsLoop:
 		if list.allowedOff == 0 {
 		allowedOffsetZeroWordsLoop:
 			for _, word := range list.list {
-				for letter, letterCount := range word.lettersWithCount {
-					if m.letterCount[letter] != letterCount {
+				for _, letterAndCount := range word.lettersWithCount {
+					if m.letterCount[letterAndCount.letter] != letterAndCount.count {
 						continue allowedOffsetZeroWordsLoop
 					}
 				}
@@ -188,14 +208,14 @@ listsLoop:
 			for _, word := range list.list {
 				// off contains the word offset from the currently inspecting word
 				var off uint16
-				for letter, letterCount := range word.lettersWithCount {
-					currentWordLetterCount := m.letterCount[letter]
-					if currentWordLetterCount == letterCount {
+				for _, letterAndCount := range word.lettersWithCount {
+					currentWordLetterCount := m.letterCount[letterAndCount.letter]
+					if currentWordLetterCount == letterAndCount.count {
 						continue
-					} else if letterCount > currentWordLetterCount {
-						off += letterCount - currentWordLetterCount
+					} else if letterAndCount.count > currentWordLetterCount {
+						off += letterAndCount.count - currentWordLetterCount
 					} else {
-						off += currentWordLetterCount - letterCount
+						off += currentWordLetterCount - letterAndCount.count
 					}
 					if off > list.allowedOff {
 						continue wordsLoop
