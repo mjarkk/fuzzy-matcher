@@ -33,9 +33,13 @@ type Sentence struct {
 	inputSentence string
 	// Every sentence word will have a index this is ORd together and stored in this field
 	// When matching we can do the same and compare the result match values, that way we know if we matched the full sentence
-	testMatched  uint64
+	testMatched uint64
+
+	// Contains a list of potential words for every word length from 1-254
+	// It contains the words maching -1 to 1 length so this list will have duplicated entries
 	wordsWithLen [255]*wordsListWithLen
-	minWordLen   uint8
+
+	minWordLen uint8
 
 	// Used by matcher
 	matchedWordsIndex uint64
@@ -102,7 +106,7 @@ func NewMatcher(sentences ...string) *Matcher {
 			}
 		}
 
-		wordsWithLen := [255]*wordsListWithLen{}
+		wordsWithLen := [255][]wordEntry{}
 		wordIndex := uint64(1)
 		testSentencedMatched := uint64(0)
 
@@ -118,37 +122,53 @@ func NewMatcher(sentences ...string) *Matcher {
 			}
 
 			if wordsWithLen[word.wordLen] == nil {
-				// set the allowed offset
-				var allowedOff uint16
-				if word.wordLen > 3 {
-					if word.wordLen < 10 {
-						allowedOff = 1
-					} else if word.wordLen < 20 {
-						allowedOff = 2
-					} else if word.wordLen < 30 {
-						allowedOff = 3
-					}
-				}
-
-				wordsWithLen[word.wordLen] = &wordsListWithLen{
-					list:       []wordEntry{},
-					allowedOff: allowedOff,
-				}
+				wordsWithLen[word.wordLen] = []wordEntry{}
 			} else {
 				// Check if this word is already in the list
 				wordAsStr := b2s(word.word)
-				for _, listEntry := range wordsWithLen[word.wordLen].list {
+				for _, listEntry := range wordsWithLen[word.wordLen] {
 					if b2s(listEntry.word) == wordAsStr {
 						continue outerLoop
 					}
 				}
 			}
 
-			list := wordsWithLen[word.wordLen]
 			word.wordIdx = wordIndex
 			testSentencedMatched |= wordIndex
 			wordIndex <<= 1
-			list.list = append(list.list, word)
+			wordsWithLen[word.wordLen] = append(wordsWithLen[word.wordLen], word)
+		}
+
+		wordsWithLenWithDiff := [255]*wordsListWithLen{}
+		for idx, list := range wordsWithLen {
+			newList := list
+
+			if idx != 0 && wordsWithLen[idx-1] != nil {
+				newList = append(newList, wordsWithLen[idx-1]...)
+			}
+			if idx != 254 && wordsWithLen[idx+1] != nil {
+				newList = append(newList, wordsWithLen[idx+1]...)
+			}
+
+			if len(newList) == 0 {
+				continue
+			}
+
+			var allowedOff uint16
+			if idx > 3 {
+				if idx < 10 {
+					allowedOff = 1
+				} else if idx < 20 {
+					allowedOff = 2
+				} else {
+					allowedOff = 3
+				}
+			}
+
+			wordsWithLenWithDiff[idx] = &wordsListWithLen{
+				allowedOff: allowedOff,
+				list:       newList,
+			}
 		}
 
 		if minWordLen > 2 {
@@ -157,7 +177,7 @@ func NewMatcher(sentences ...string) *Matcher {
 		m.sentences[idx] = &Sentence{
 			inputSentence: sentence,
 			testMatched:   testSentencedMatched,
-			wordsWithLen:  wordsWithLen,
+			wordsWithLen:  wordsWithLenWithDiff,
 			minWordLen:    minWordLen,
 		}
 	}
@@ -174,69 +194,54 @@ func (s *Sentence) wordMatch(m *Matcher, wordLen uint8) uint64 {
 		return 0
 	}
 
-	wordsListsToMatchWith := []*wordsListWithLen{
-		s.wordsWithLen[wordLen],
-		s.wordsWithLen[wordLen-1],
-		s.wordsWithLen[wordLen+1],
-	}
-
 	// Contains either
 	// Null if no words matched
 	// The index of a exact match
 	// The indexes of all the words that somewhat matched
 	potentialWordIndex := uint64(0)
 
-listsLoop:
-	for _, list := range wordsListsToMatchWith {
-		if list == nil {
-			continue
-		}
+	list := s.wordsWithLen[wordLen]
+	if list == nil {
+		return potentialWordIndex
+	}
 
-		if list.allowedOff == 0 {
-		allowedOffsetZeroWordsLoop:
-			for _, word := range list.list {
-				for _, letterAndCount := range word.lettersWithCount {
-					if m.letterCount[letterAndCount.letter] != letterAndCount.count {
-						continue allowedOffsetZeroWordsLoop
-					}
+	if list.allowedOff == 0 {
+		// If no offset is allowed, we can skip a lot of logic
+		// That's why we have a diffrent loop for these
+	allowedOffsetZeroWordsLoop:
+		for _, word := range list.list {
+			for _, letterAndCount := range word.lettersWithCount {
+				if m.letterCount[letterAndCount.letter] != letterAndCount.count {
+					continue allowedOffsetZeroWordsLoop
 				}
-				potentialWordIndex = word.wordIdx
-				break listsLoop
 			}
-		} else {
-		wordsLoop:
-			for _, word := range list.list {
-				// off contains the word offset from the currently inspecting word
-				var off uint16
-				for _, letterAndCount := range word.lettersWithCount {
-					currentWordLetterCount := m.letterCount[letterAndCount.letter]
-					if currentWordLetterCount == letterAndCount.count {
-						continue
-					} else if letterAndCount.count > currentWordLetterCount {
-						off += letterAndCount.count - currentWordLetterCount
-					} else {
-						off += currentWordLetterCount - letterAndCount.count
-					}
-					if off > list.allowedOff {
-						continue wordsLoop
-					}
-				}
-				if off == 0 {
-					// We found an exact match!
-					// As potentialWordIndex is ORed to the matchedWordsIdx later on we write the word index in
-					// there so later on the index gets ORed to the matchedWordsIdx
-					potentialWordIndex = word.wordIdx
-					break listsLoop
-				}
-				potentialWordIndex |= word.wordIdx
+			return word.wordIdx
+		}
+		return potentialWordIndex
+	}
+
+wordsLoop:
+	for _, word := range list.list {
+		// off contains the word offset from the currently inspecting word
+		var off uint16
+		for _, letterAndCount := range word.lettersWithCount {
+			currentWordLetterCount := m.letterCount[letterAndCount.letter]
+			if currentWordLetterCount == letterAndCount.count {
+				continue
+			} else if letterAndCount.count > currentWordLetterCount {
+				off += letterAndCount.count - currentWordLetterCount
+			} else {
+				off += currentWordLetterCount - letterAndCount.count
+			}
+			if off > list.allowedOff {
+				continue wordsLoop
 			}
 		}
-
-		if potentialWordIndex != 0 {
-			// Break the loop early if we have some potential matches
-			// Don't waist cpu cycles
-			break
+		if off == 0 {
+			// We found an exact match, lets return that
+			return word.wordIdx
 		}
+		potentialWordIndex |= word.wordIdx
 	}
 
 	return potentialWordIndex

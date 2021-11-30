@@ -85,7 +85,7 @@ func BenchmarkMatchWithProfile(b *testing.B) {
 }
 
 func BenchmarkMatch(b *testing.B) {
-	// BenchmarkMatch-12    	 1674688	       691.3 ns/op	       0 B/op	       0 allocs/op
+	// BenchmarkMatch-12    	 1897522	       608.7 ns/op	       0 B/op	       0 allocs/op
 
 	matcher := NewMatcher(
 		"I love trees",
