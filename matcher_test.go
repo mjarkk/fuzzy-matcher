@@ -1,9 +1,11 @@
 package fuzzymatcher
 
 import (
+	"io/ioutil"
 	"log"
 	"os"
 	"runtime/pprof"
+	"strings"
 	"testing"
 
 	a "github.com/stretchr/testify/assert"
@@ -61,7 +63,7 @@ func TestMatch(t *testing.T) {
 		{2, "bananas are the best fruit"},
 		{2, "banana"},
 		{0, "do you also love trees? i do."},
-		{2, "on a sunday afternoon i like to eat a banana"},
+		{2, "on a sunday afternoon i like to eat a bänanã"},
 	}
 
 	for _, testCase := range matchesWith {
@@ -110,5 +112,20 @@ func BenchmarkMatch(b *testing.B) {
 		for _, v := range matchesWith {
 			matcher.Match(v)
 		}
+	}
+}
+
+func TestIdk(t *testing.T) {
+	file, err := ioutil.ReadFile("wha")
+	a.NoError(t, err)
+
+	lines := strings.Split(strings.TrimSpace(string(file)), "\n")
+	for idx, line := range lines {
+		lines[idx] = strings.TrimSpace(line)
+	}
+
+	matcher := NewMatcher(lines...)
+	for _, line := range lines {
+		a.NotEqual(t, -1, matcher.Match(line))
 	}
 }
