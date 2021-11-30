@@ -19,6 +19,8 @@ func TestMatch(t *testing.T) {
 		{"banana", "banan", true},
 		{"banana", "banaana", true},
 		{"banana", "bananas", true},
+		{"coördinator", "coordinator", true},
+		{"coordinator", "coördinator", true},
 		{"banana", "i want a banana", true},
 		{"some thing", "thing some", true},
 		{"says pet", "i love food says the pet", true},

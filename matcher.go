@@ -68,7 +68,34 @@ func NewMatcher(sentences ...string) *Matcher {
 		wordsWithCounter := []wordEntry{newWordEntry()}
 		lastWordIdx := 0
 
-		for _, c := range s2b(sentence) {
+		sentenceAsBytes := []byte(sentence)
+		writeAscii := func(c byte) {
+			currentWord := wordsWithCounter[lastWordIdx]
+			if currentWord.wordLen < 254 {
+				currentWord.wordLen++
+			}
+
+			foundLetter := false
+			for idx, letter := range currentWord.lettersWithCount {
+				if letter.letter == c {
+					letter.count++
+					currentWord.lettersWithCount[idx] = letter
+					foundLetter = true
+					break
+				}
+			}
+			if !foundLetter {
+				currentWord.lettersWithCount = append(currentWord.lettersWithCount, letter{
+					letter: c,
+					count:  1,
+				})
+			}
+			currentWord.word = append(currentWord.word, c)
+			wordsWithCounter[lastWordIdx] = currentWord
+		}
+
+		for cIdx := 0; cIdx < len(sentenceAsBytes); cIdx++ {
+			c := sentenceAsBytes[cIdx]
 			if c >= 'B' && c <= 'Z' {
 				c += 'b' - 'B'
 			}
@@ -77,29 +104,47 @@ func NewMatcher(sentences ...string) *Matcher {
 				continue
 			default:
 				if (c >= 'b' && c <= 'z') || (c >= '0' && c <= '9') {
-					currentWord := wordsWithCounter[lastWordIdx]
-					if currentWord.wordLen < 254 {
-						currentWord.wordLen++
+					writeAscii(c)
+				} else if c >= utf8.RuneSelf {
+					runeEndIdx := cIdx + 4
+					if runeEndIdx > len(sentence) {
+						runeEndIdx = len(sentence)
+					}
+					runeBytes := sentenceAsBytes[cIdx:runeEndIdx]
+					r, runeLen := utf8.DecodeRune(runeBytes)
+					switch r {
+					case utf8.RuneError:
+						if runeLen == 0 {
+							runeLen = 1
+						}
+					case 'à', 'á', 'â', 'ä', 'æ', 'ã', 'å', 'ā',
+						'è', 'é', 'ê', 'ë', 'ē', 'ė', 'ę', 'ě',
+						'ì', 'í', 'î', 'ï', 'ī', 'į', 'ı',
+						'ò', 'ó', 'ô', 'ö', 'ø', 'ō', 'ŏ', 'ő',
+						'ù', 'ú', 'û', 'ü', 'ū', 'ŭ', 'ů', 'ű',
+						'œ', 'Œ':
+						continue
+					case 'ĳ':
+						writeAscii('j')
+					case 'ç', 'ć', 'č', 'ĉ', 'ċ':
+						writeAscii('c')
+					case 'ż', 'ź', 'ž':
+						writeAscii('z')
+					case 'ß':
+						writeAscii('s')
+					case 'ÿ', 'ý':
+						writeAscii('y')
+					default:
+						if r >= 0x0300 && r <= 0x036F {
+							// ignore unicode: Combining Diacritical Marks
+							// https://www.compart.com/en/unicode/block/U+0300
+							continue
+						}
+						// TODO do something with ALL the other utf8 runes
 					}
 
-					foundLetter := false
-					for idx, letter := range currentWord.lettersWithCount {
-						if letter.letter == c {
-							letter.count++
-							currentWord.lettersWithCount[idx] = letter
-							foundLetter = true
-							break
-						}
-					}
-					if !foundLetter {
-						currentWord.lettersWithCount = append(currentWord.lettersWithCount, letter{
-							letter: c,
-							count:  1,
-						})
-					}
-					currentWord.word = append(currentWord.word, c)
-					wordsWithCounter[lastWordIdx] = currentWord
-				} else if c < utf8.RuneSelf {
+					cIdx += runeLen - 1
+				} else {
 					wordsWithCounter = append(wordsWithCounter, newWordEntry())
 					lastWordIdx++
 				}
@@ -277,7 +322,8 @@ func (m *Matcher) Match(inStr string) int {
 		return false
 	}
 
-	for _, c := range in {
+	for idx := 0; idx < len(in); idx++ {
+		c := in[idx]
 		if c >= 'B' && c <= 'Z' {
 			c += 'b' - 'B'
 		}
@@ -285,11 +331,59 @@ func (m *Matcher) Match(inStr string) int {
 		case 'a', 'e', 'i', 'o', 'u':
 			continue
 		default:
-			if (c >= 'b' && c <= 'z') || (c >= '0' && c <= '9') || c >= utf8.RuneSelf {
+			if (c >= 'b' && c <= 'z') || (c >= '0' && c <= '9') {
 				m.letterCount[c]++
 				if currentWordLen != 253 {
 					currentWordLen++
 				}
+			} else if c >= utf8.RuneSelf {
+				r, rLen := utf8.DecodeRune(in[idx:])
+				switch r {
+				case utf8.RuneError:
+					if rLen == 0 {
+						rLen = 1
+					}
+				case 'à', 'á', 'â', 'ä', 'æ', 'ã', 'å', 'ā',
+					'è', 'é', 'ê', 'ë', 'ē', 'ė', 'ę', 'ě',
+					'ì', 'í', 'î', 'ï', 'ī', 'į', 'ı',
+					'ò', 'ó', 'ô', 'ö', 'ø', 'ō', 'ŏ', 'ő',
+					'ù', 'ú', 'û', 'ü', 'ū', 'ŭ', 'ů', 'ű',
+					'œ', 'Œ':
+					continue
+				case 'ĳ':
+					m.letterCount['j']++
+					if currentWordLen != 253 {
+						currentWordLen++
+					}
+				case 'ç', 'ć', 'č', 'ĉ', 'ċ':
+					m.letterCount['c']++
+					if currentWordLen != 253 {
+						currentWordLen++
+					}
+				case 'ż', 'ź', 'ž':
+					m.letterCount['z']++
+					if currentWordLen != 253 {
+						currentWordLen++
+					}
+				case 'ß':
+					m.letterCount['s']++
+					if currentWordLen != 253 {
+						currentWordLen++
+					}
+				case 'ÿ', 'ý':
+					m.letterCount['y']++
+					if currentWordLen != 253 {
+						currentWordLen++
+					}
+				default:
+					if r >= 0x0300 && r <= 0x036F {
+						// ignore unicode: Combining Diacritical Marks
+						// https://www.compart.com/en/unicode/block/U+0300
+						continue
+					}
+					// TODO do something with ALL the other utf8 runes
+				}
+				idx += rLen - 1
 			} else if currentWordLen > 0 && doMatch() {
 				return result
 			}
