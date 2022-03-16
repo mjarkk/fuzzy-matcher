@@ -8,399 +8,356 @@ type wordEntry struct {
 	// wordIdx contains one bit sifted to the left for each word in the sentence
 	// So wordIdx will be 1, 2, 4, 8, 16, 32, ...
 	// This also means the wordIdx can be a maximum of 64 words
-	wordIdx uint64
+	WordIdx uint64
+	Letters []rune
 
-	word             []byte
-	lettersWithCount []letter
-	wordLen          uint8
+	len               int
+	allowedOffset     int
+	FuzzyFirstLetter  [3]rune
+	FuzzyLettersOrder [][3]rune
 }
 
-type letter struct {
-	letter byte
-	count  uint16
+func (we *wordEntry) letterAt(idx int) rune {
+	if idx < 0 || idx >= len(we.Letters) {
+		return 0
+	}
+	return we.Letters[idx]
 }
 
-func newWordEntry() wordEntry {
-	return wordEntry{
-		wordIdx:          0,
-		word:             []byte{},
-		lettersWithCount: []letter{},
-		wordLen:          0,
+func (we *wordEntry) calculateFuzzyLetterOrder() {
+	we.len = len(we.Letters)
+	if we.len <= 4 {
+		we.allowedOffset = 1
+	} else if we.len <= 7 {
+		we.allowedOffset = 2
+	} else {
+		we.allowedOffset = 3
+	}
+
+	we.FuzzyLettersOrder = [][3]rune{}
+
+	lettersLen := len(we.Letters)
+	possibleNextLetters := [3]rune{}
+	for i := 0; i < lettersLen-1; i++ {
+		possibleNextLetters = [3]rune{we.letterAt(i + 1), we.letterAt(i + 2), we.letterAt(i + 3)}
+		if we.allowedOffset < 3 {
+			possibleNextLetters[2] = 0
+			if we.allowedOffset < 2 {
+				possibleNextLetters[1] = 0
+			}
+		}
+		we.FuzzyLettersOrder = append(we.FuzzyLettersOrder, possibleNextLetters)
+	}
+
+	we.FuzzyFirstLetter = [3]rune{we.letterAt(0)}
+	nextLetter := we.letterAt(1)
+	if nextLetter != utf8.RuneError && we.allowedOffset >= 2 {
+		we.FuzzyFirstLetter[1] = nextLetter
+
+		nextLetter := we.letterAt(2)
+		if nextLetter != utf8.RuneError && we.allowedOffset >= 3 {
+			we.FuzzyFirstLetter[2] = nextLetter
+		}
 	}
 }
 
-type Sentence struct {
-	inputSentence string
-	// Every sentence word will have a index this is ORd together and stored in this field
-	// When matching we can do the same and compare the result match values, that way we know if we matched the full sentence
-	testMatched uint64
-
-	// Contains a list of potential words for every word length from 1-254
-	// It contains the words maching -1 to 1 length so this list will have duplicated entries
-	wordsWithLen [255]*wordsListWithLen
-
-	minWordLen uint8
-
-	// Used by matcher
-	matchedWordsIndex uint64
+type pathToWord struct {
+	Letter             rune
+	Sentence           int
+	Word               int
+	WordOffset         int
+	MustRemainingChars int
 }
 
-type wordsListWithLen struct {
-	allowedOff uint16
-	list       []wordEntry
+type sentenceT struct {
+	Words                []wordEntry
+	IdxInNewMatcherInput int
+
+	// the fields below are generated with the (*sentence).complete() method
+	Paths       []pathToWord
+	IndexSum    uint64
+	SentenceLen int
+
+	// Used in the matching process
+	MatchIndexSum uint64
 }
 
+func (s *sentenceT) complete() {
+	s.Paths = []pathToWord{}
+	for wordIdx, word := range s.Words {
+		for offset, letter := range word.FuzzyFirstLetter {
+			if letter == 0 {
+				break
+			}
+			s.Paths = append(s.Paths, pathToWord{
+				Letter:             letter,
+				Sentence:           -1,
+				Word:               wordIdx,
+				WordOffset:         offset,
+				MustRemainingChars: word.len - word.allowedOffset - 1,
+			})
+		}
+		s.IndexSum |= word.WordIdx
+		s.SentenceLen += word.len
+		if wordIdx != len(s.Words)-1 {
+			// Also add a space character for the
+			s.SentenceLen++
+		}
+	}
+}
+
+// Matcher is used to match sentences
 type Matcher struct {
-	sentences []*Sentence
+	Sentences []sentenceT
 
-	// Used by matcher
-	letterCount [256]uint16
+	// the fields below are generated with the (*Matcher).complete() method
+	Paths []pathToWord
+
+	// Zero alloc cache
+	UTF8RuneCreation  []byte
+	InProgressMatches []inProgressMatch
 }
 
-// NewMatcher creates a new matcher that can be used to match
-// Note that this method takes time as it optimized the input sentences to be fast to match
+func (m *Matcher) complete() {
+	m.Paths = []pathToWord{}
+	for idx, sentence := range m.Sentences {
+		for _, path := range sentence.Paths {
+			path.Sentence = idx
+			m.Paths = append(m.Paths, path)
+		}
+	}
+}
+
+const upperToLowerCaseOffset = 'a' - 'A'
+
+// NewMatcher creates a new instance of the matcher
+// This function takes relatively long to execute so do this once, and use the returned matcher to match it against lots of entries
 func NewMatcher(sentences ...string) *Matcher {
-	m := &Matcher{
-		sentences: make([]*Sentence, len(sentences)),
+	res := Matcher{
+		Sentences:         []sentenceT{},
+		UTF8RuneCreation:  []byte{},
+		InProgressMatches: []inProgressMatch{},
 	}
 
-	for idx, sentence := range sentences {
-		wordsWithCounter := []wordEntry{newWordEntry()}
-		lastWordIdx := 0
+	for sentenceIdx, sentence := range sentences {
+		parsedSentence := sentenceT{
+			Words:                []wordEntry{},
+			IdxInNewMatcherInput: sentenceIdx,
+		}
 
-		sentenceAsBytes := []byte(sentence)
-		writeASCII := func(c byte) {
-			currentWord := wordsWithCounter[lastWordIdx]
-			if currentWord.wordLen < 254 {
-				currentWord.wordLen++
+		word := wordEntry{WordIdx: 1}
+		commitWord := func() {
+			if len(word.Letters) <= 1 {
+				// Just reset the current word
+				word = wordEntry{WordIdx: word.WordIdx}
+			} else {
+				word.calculateFuzzyLetterOrder()
+				parsedSentence.Words = append(parsedSentence.Words, word)
+				word = wordEntry{WordIdx: word.WordIdx << 1}
+			}
+		}
+
+		for _, c := range []rune(sentence) {
+			if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+				word.Letters = append(word.Letters, c)
+			} else if c >= 'A' && c <= 'Z' {
+				c += upperToLowerCaseOffset
+				word.Letters = append(word.Letters, c)
+			} else {
+				switch c {
+				case ' ', '\t', '\n', '\r':
+					commitWord()
+				default:
+					if c >= utf8.RuneSelf {
+						word.Letters = append(word.Letters, c)
+					}
+				}
+			}
+		}
+		commitWord()
+
+		if len(parsedSentence.Words) == 0 {
+			continue
+		}
+
+		parsedSentence.complete()
+		res.Sentences = append(res.Sentences, parsedSentence)
+	}
+
+	res.complete()
+	return &res
+}
+
+type inProgressMatch struct {
+	PathToWord   pathToWord
+	Word         *wordEntry
+	Sentence     *sentenceT
+	WordOffset   int
+	SkippedChars int
+}
+
+func (e *inProgressMatch) addWordIdxToSentence() int {
+	e.Sentence.MatchIndexSum |= e.Word.WordIdx
+	if e.Sentence.MatchIndexSum == e.Sentence.IndexSum {
+		return e.Sentence.IdxInNewMatcherInput
+	}
+	return -1
+}
+
+// Match matches a sentence to the matchers input
+// Returns the index of the matched sentenced
+// If nothing found returns -1
+func (m *Matcher) Match(sentence string) int {
+	// Reset the matching index sums and zero alloc cache
+	for idx := range m.Sentences {
+		m.Sentences[idx].MatchIndexSum = 0
+	}
+	m.InProgressMatches = m.InProgressMatches[:0]
+
+	sentenceLen := len(sentence)
+	var rLetter rune
+
+	beginWord := true
+	for i := 0; i < sentenceLen; i++ {
+		letter := sentence[i]
+		if letter == 0 {
+			continue
+		}
+
+		if letter >= utf8.RuneSelf {
+			if !beginWord && len(m.InProgressMatches) == 0 {
+				continue
 			}
 
-			foundLetter := false
-			for idx, letter := range currentWord.lettersWithCount {
-				if letter.letter == c {
-					letter.count++
-					currentWord.lettersWithCount[idx] = letter
-					foundLetter = true
+			switch i {
+			case sentenceLen - 1:
+				// This is a invalid character
+				rLetter = utf8.RuneError
+			case sentenceLen - 2:
+				r, size := utf8.DecodeRune(append(m.UTF8RuneCreation[:0], letter, sentence[i+1]))
+				i += size - 1
+				rLetter = r
+			case sentenceLen - 3:
+				r, size := utf8.DecodeRune(append(m.UTF8RuneCreation[:0], letter, sentence[i+1], sentence[i+2]))
+				i += size - 1
+				rLetter = r
+			default:
+				r, size := utf8.DecodeRune(append(m.UTF8RuneCreation[:0], letter, sentence[i+1], sentence[i+2], sentence[i+3]))
+				i += size - 1
+				rLetter = r
+			}
+			if rLetter == utf8.RuneError {
+				continue
+			}
+		} else {
+			rLetter = rune(sentence[i])
+
+			if (rLetter >= 'a' && rLetter <= 'z') || (rLetter >= '0' && rLetter <= '9') {
+				// Do nothing
+			} else if rLetter >= 'A' && rLetter <= 'Z' {
+				rLetter += upperToLowerCaseOffset
+			} else {
+				switch letter {
+				case ' ', '\t', '\n', '\r':
+					// go to next word
+					for _, entry := range m.InProgressMatches {
+						// Check if we mis the last chars
+						// If so this entry is oke
+						// Makes sure "banan" can match "banana"
+						if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
+							res := entry.addWordIdxToSentence()
+							if res != -1 {
+								return res
+							}
+						}
+					}
+					m.InProgressMatches = m.InProgressMatches[:0]
+					beginWord = true
+					continue
+				default:
+					continue
+				}
+			}
+		}
+
+		if beginWord {
+			for _, path := range m.Paths {
+				if path.Letter == rLetter && sentenceLen-i-1 >= path.MustRemainingChars {
+					sentence := &m.Sentences[path.Sentence]
+					word := &sentence.Words[path.Word]
+
+					if sentence.MatchIndexSum&word.WordIdx != 0 {
+						// This word was earlier already matched
+						continue
+					}
+
+					m.InProgressMatches = append(m.InProgressMatches, inProgressMatch{
+						PathToWord:   path,
+						Word:         word,
+						Sentence:     sentence,
+						WordOffset:   path.WordOffset,
+						SkippedChars: path.WordOffset,
+					})
+				}
+			}
+
+			beginWord = false
+			continue
+		}
+
+	outer:
+		for i := len(m.InProgressMatches) - 1; i >= 0; i-- {
+			entry := m.InProgressMatches[i]
+			for offset, c := range entry.Word.FuzzyLettersOrder[entry.WordOffset] {
+				if c == rLetter {
+					entry.WordOffset += offset + 1
+					m.InProgressMatches[i] = entry
+					if entry.WordOffset == len(entry.Word.FuzzyLettersOrder) {
+						// Completed matching this word
+						res := entry.addWordIdxToSentence()
+						if res != -1 {
+							return res
+						}
+						m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
+					}
+					continue outer
+				}
+
+				if c == 0 {
 					break
 				}
 			}
-			if !foundLetter {
-				currentWord.lettersWithCount = append(currentWord.lettersWithCount, letter{
-					letter: c,
-					count:  1,
-				})
-			}
-			currentWord.word = append(currentWord.word, c)
-			wordsWithCounter[lastWordIdx] = currentWord
-		}
 
-		for cIdx := 0; cIdx < len(sentenceAsBytes); cIdx++ {
-			c := sentenceAsBytes[cIdx]
-			if c >= 'B' && c <= 'Z' {
-				c += 'b' - 'B'
+			// Check if we mis the last chars
+			// If so this entry is oke
+			// Makes sure "banan" can match "banana"
+			if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
+				res := entry.addWordIdxToSentence()
+				if res != -1 {
+					return res
+				}
 			}
-			if (c >= 'b' && c <= 'z') || (c >= '0' && c <= '9') {
-				writeASCII(c)
-			} else if c >= utf8.RuneSelf {
-				runeEndIdx := cIdx + 4
-				if runeEndIdx > len(sentence) {
-					runeEndIdx = len(sentence)
-				}
-				runeBytes := sentenceAsBytes[cIdx:runeEndIdx]
-				r, runeLen := utf8.DecodeRune(runeBytes)
-				switch r {
-				case utf8.RuneError:
-					if runeLen == 0 {
-						runeLen = 1
-					}
-				case 'à', 'á', 'â', 'ä', 'æ', 'ã', 'å', 'ā', 'œ', 'Œ':
-					writeASCII('a')
-				case 'è', 'é', 'ê', 'ë', 'ē', 'ė', 'ę', 'ě':
-					writeASCII('e')
-				case 'ì', 'í', 'î', 'ï', 'ī', 'į', 'ı':
-					writeASCII('i')
-				case 'ò', 'ó', 'ô', 'ö', 'ø', 'ō', 'ŏ', 'ő':
-					writeASCII('o')
-				case 'ù', 'ú', 'û', 'ü', 'ū', 'ŭ', 'ů', 'ű':
-					writeASCII('u')
-				case 'ĳ':
-					writeASCII('j')
-				case 'ç', 'ć', 'č', 'ĉ', 'ċ':
-					writeASCII('c')
-				case 'ż', 'ź', 'ž':
-					writeASCII('z')
-				case 'ß':
-					writeASCII('s')
-				case 'ÿ', 'ý':
-					writeASCII('y')
-				default:
-					if r >= 0x0300 && r <= 0x036F {
-						// ignore unicode: Combining Diacritical Marks
-						// https://www.compart.com/en/unicode/block/U+0300
-						continue
-					}
-					// TODO do something with ALL the other utf8 runes
-				}
 
-				cIdx += runeLen - 1
+			if entry.SkippedChars < entry.Word.allowedOffset {
+				entry.SkippedChars++
+				m.InProgressMatches[i] = entry
 			} else {
-				wordsWithCounter = append(wordsWithCounter, newWordEntry())
-				lastWordIdx++
+				m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
 			}
-		}
-
-		wordsWithLen := [255][]wordEntry{}
-		wordIndex := uint64(1)
-		testSentencedMatched := uint64(0)
-
-		minWordLen := uint8(254)
-	outerLoop:
-		for idx := len(wordsWithCounter) - 1; idx >= 0; idx-- {
-			word := wordsWithCounter[idx]
-			if word.wordLen == 0 {
-				continue
-			}
-			if word.wordLen < minWordLen {
-				minWordLen = word.wordLen
-			}
-
-			if wordsWithLen[word.wordLen] == nil {
-				wordsWithLen[word.wordLen] = []wordEntry{}
-			} else {
-				// Check if this word is already in the list
-				wordAsStr := b2s(word.word)
-				for _, listEntry := range wordsWithLen[word.wordLen] {
-					if b2s(listEntry.word) == wordAsStr {
-						continue outerLoop
-					}
-				}
-			}
-
-			word.wordIdx = wordIndex
-			testSentencedMatched |= wordIndex
-			wordIndex <<= 1
-			wordsWithLen[word.wordLen] = append(wordsWithLen[word.wordLen], word)
-		}
-
-		wordsWithLenWithDiff := [255]*wordsListWithLen{}
-		for idx, list := range wordsWithLen {
-			newList := list
-
-			if idx != 0 && wordsWithLen[idx-1] != nil {
-				newList = append(newList, wordsWithLen[idx-1]...)
-			}
-			if idx != 254 && wordsWithLen[idx+1] != nil {
-				newList = append(newList, wordsWithLen[idx+1]...)
-			}
-
-			if len(newList) == 0 {
-				continue
-			}
-
-			var allowedOff uint16
-			if idx > 3 {
-				if idx < 10 {
-					allowedOff = 1
-				} else if idx < 20 {
-					allowedOff = 2
-				} else {
-					allowedOff = 3
-				}
-			}
-
-			wordsWithLenWithDiff[idx] = &wordsListWithLen{
-				allowedOff: allowedOff,
-				list:       newList,
-			}
-		}
-
-		if minWordLen > 2 {
-			minWordLen -= 2
-		}
-		m.sentences[idx] = &Sentence{
-			inputSentence: sentence,
-			testMatched:   testSentencedMatched,
-			wordsWithLen:  wordsWithLenWithDiff,
-			minWordLen:    minWordLen,
 		}
 	}
 
-	return m
-}
-
-func (m *Matcher) clearLetterCount() {
-	m.letterCount = [256]uint16{}
-}
-
-func (s *Sentence) wordMatch(m *Matcher, wordLen uint8) uint64 {
-	if wordLen < s.minWordLen {
-		return 0
-	}
-
-	// Contains either
-	// Null if no words matched
-	// The index of a exact match
-	// The indexes of all the words that somewhat matched
-	potentialWordIndex := uint64(0)
-
-	list := s.wordsWithLen[wordLen]
-	if list == nil {
-		return potentialWordIndex
-	}
-
-	if list.allowedOff == 0 {
-		// If no offset is allowed, we can skip a lot of logic
-		// That's why we have a diffrent loop for these
-	allowedOffsetZeroWordsLoop:
-		for _, word := range list.list {
-			for _, letterAndCount := range word.lettersWithCount {
-				if m.letterCount[letterAndCount.letter] != letterAndCount.count {
-					continue allowedOffsetZeroWordsLoop
-				}
-			}
-			return word.wordIdx
-		}
-		return potentialWordIndex
-	}
-
-wordsLoop:
-	for _, word := range list.list {
-		// off contains the word offset from the currently inspecting word
-		var off uint16
-		for _, letterAndCount := range word.lettersWithCount {
-			currentWordLetterCount := m.letterCount[letterAndCount.letter]
-			if currentWordLetterCount == letterAndCount.count {
-				continue
-			} else if letterAndCount.count > currentWordLetterCount {
-				off += letterAndCount.count - currentWordLetterCount
-			} else {
-				off += currentWordLetterCount - letterAndCount.count
-			}
-			if off > list.allowedOff {
-				continue wordsLoop
+	for _, entry := range m.InProgressMatches {
+		// Check if we mis the last chars
+		// If so this entry is oke
+		// Makes sure "banan" can match "banana"
+		if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
+			res := entry.addWordIdxToSentence()
+			if res != -1 {
+				return res
 			}
 		}
-		if off == 0 {
-			// We found an exact match, lets return that
-			return word.wordIdx
-		}
-		potentialWordIndex |= word.wordIdx
 	}
 
-	return potentialWordIndex
-}
-
-// Match matches the inStr against the matcher inputs and returns the best matching string or -1 if nothing could be matched
-func (m *Matcher) Match(inStr string) int {
-	in := s2b(inStr)
-	currentWordLen := uint8(0)
-	result := -1
-
-	for _, s := range m.sentences {
-		s.matchedWordsIndex = 0
-	}
-
-	doMatch := func() bool {
-		if currentWordLen == 0 {
-			return false
-		}
-
-		for idx, sentence := range m.sentences {
-			sentence.matchedWordsIndex |= sentence.wordMatch(m, currentWordLen)
-			if sentence.matchedWordsIndex == sentence.testMatched {
-				m.clearLetterCount()
-				currentWordLen = 0
-				result = idx
-				return true
-			}
-		}
-
-		m.clearLetterCount()
-		currentWordLen = 0
-		return false
-	}
-
-	for idx := 0; idx < len(in); idx++ {
-		c := in[idx]
-		if c >= 'B' && c <= 'Z' {
-			c += 'b' - 'B'
-		}
-		if (c >= 'b' && c <= 'z') || (c >= '0' && c <= '9') {
-			m.letterCount[c]++
-			if currentWordLen != 253 {
-				currentWordLen++
-			}
-		} else if c >= utf8.RuneSelf {
-			r, rLen := utf8.DecodeRune(in[idx:])
-			switch r {
-			case utf8.RuneError:
-				if rLen == 0 {
-					rLen = 1
-				}
-			case 'à', 'á', 'â', 'ä', 'æ', 'ã', 'å', 'ā', 'œ', 'Œ':
-				m.letterCount['a']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'è', 'é', 'ê', 'ë', 'ē', 'ė', 'ę', 'ě':
-				m.letterCount['e']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ì', 'í', 'î', 'ï', 'ī', 'į', 'ı':
-				m.letterCount['i']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ò', 'ó', 'ô', 'ö', 'ø', 'ō', 'ŏ', 'ő':
-				m.letterCount['o']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ù', 'ú', 'û', 'ü', 'ū', 'ŭ', 'ů', 'ű':
-				m.letterCount['u']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ĳ':
-				m.letterCount['j']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ç', 'ć', 'č', 'ĉ', 'ċ':
-				m.letterCount['c']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ż', 'ź', 'ž':
-				m.letterCount['z']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ß':
-				m.letterCount['s']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			case 'ÿ', 'ý':
-				m.letterCount['y']++
-				if currentWordLen != 253 {
-					currentWordLen++
-				}
-			default:
-				if r >= 0x0300 && r <= 0x036F {
-					// ignore unicode: Combining Diacritical Marks
-					// https://www.compart.com/en/unicode/block/U+0300
-					continue
-				}
-				// TODO do something with ALL the other utf8 runes
-			}
-			idx += rLen - 1
-		} else if currentWordLen > 0 && doMatch() {
-			return result
-		}
-	}
-
-	doMatch()
-	return result
+	return -1
 }
