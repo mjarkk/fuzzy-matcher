@@ -94,7 +94,8 @@ func TestMatching(t *testing.T) {
 			"another sentence that contains the other sentence \"this is a very long sentence\" so there should be a match",
 			true,
 		},
-
+		{"123 Avenue Road", "123 Avvenue Road, Greenmeadows, Napier 4112", true},
+		{"foo bar", "foo,bar", true},
 		{"somewhere over the rainbow", "somewhere", false},
 		{"banana", "apple", false},
 		{"bananen lekker", "bananen zijn vies", false},

@@ -257,26 +257,21 @@ func (m *Matcher) Match(sentence string) int {
 			} else if rLetter >= 'A' && rLetter <= 'Z' {
 				rLetter += upperToLowerCaseOffset
 			} else {
-				switch letter {
-				case ' ', '\t', '\n', '\r':
-					// go to next word
-					for _, entry := range m.InProgressMatches {
-						// Check if we mis the last chars
-						// If so this entry is oke
-						// Makes sure "banan" can match "banana"
-						if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
-							res := entry.addWordIdxToSentence()
-							if res != -1 {
-								return res
-							}
+				// go to next word
+				for _, entry := range m.InProgressMatches {
+					// Check if we mis the last chars
+					// If so this entry is oke
+					// Makes sure "banan" can match "banana"
+					if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
+						res := entry.addWordIdxToSentence()
+						if res != -1 {
+							return res
 						}
 					}
-					m.InProgressMatches = m.InProgressMatches[:0]
-					beginWord = true
-					continue
-				default:
-					continue
 				}
+				m.InProgressMatches = m.InProgressMatches[:0]
+				beginWord = true
+				continue
 			}
 		}
 
