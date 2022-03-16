@@ -37,6 +37,7 @@ func TestMatch(t *testing.T) {
 		{"somewhere over the rainbow", "somewhere", false},
 		{"banana", "apple", false},
 		{"bananen lekker", "bananen zijn vies", false},
+		{"Metselaar", "slijterij", false},
 	}
 
 	for _, testCase := range testCases {
