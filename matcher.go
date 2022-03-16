@@ -310,8 +310,13 @@ func (m *Matcher) Match(sentence string) int {
 			entry := m.InProgressMatches[i]
 			for offset, c := range entry.Word.FuzzyLettersOrder[entry.WordOffset] {
 				if c == rLetter {
+					if offset > 0 && offset > entry.Word.allowedOffset-entry.SkippedChars {
+						continue
+					}
+
 					entry.WordOffset += offset + 1
-					m.InProgressMatches[i] = entry
+					entry.SkippedChars += offset
+
 					if entry.WordOffset == len(entry.Word.FuzzyLettersOrder) {
 						// Completed matching this word
 						res := entry.addWordIdxToSentence()
@@ -319,22 +324,14 @@ func (m *Matcher) Match(sentence string) int {
 							return res
 						}
 						m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
+					} else {
+						m.InProgressMatches[i] = entry
 					}
 					continue outer
 				}
 
 				if c == 0 {
 					break
-				}
-			}
-
-			// Check if we mis the last chars
-			// If so this entry is oke
-			// Makes sure "banan" can match "banana"
-			if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
-				res := entry.addWordIdxToSentence()
-				if res != -1 {
-					return res
 				}
 			}
 
