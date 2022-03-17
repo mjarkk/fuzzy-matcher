@@ -111,7 +111,8 @@ type Matcher struct {
 	Sentences []sentenceT
 
 	// the fields below are generated with the (*Matcher).complete() method
-	Paths []pathToWord
+	Paths        []pathToWord
+	PathByLetter map[rune][]pathToWord
 
 	// Zero alloc cache
 	UTF8RuneCreation  []byte
@@ -120,10 +121,20 @@ type Matcher struct {
 
 func (m *Matcher) complete() {
 	m.Paths = []pathToWord{}
+	m.PathByLetter = map[rune][]pathToWord{}
+
 	for idx, sentence := range m.Sentences {
 		for _, path := range sentence.Paths {
 			path.Sentence = idx
+
 			m.Paths = append(m.Paths, path)
+			list, ok := m.PathByLetter[path.Letter]
+			// Add the path to a specific paths list or create a new paths list
+			if !ok {
+				m.PathByLetter[path.Letter] = []pathToWord{path}
+			} else {
+				m.PathByLetter[path.Letter] = append(list, path)
+			}
 		}
 	}
 }
@@ -258,6 +269,8 @@ func (m *Matcher) Match(sentence string) int {
 				rLetter += upperToLowerCaseOffset
 			} else {
 				// go to next word
+
+				// Firstly lets check if there where any matches from the last word
 				for _, entry := range m.InProgressMatches {
 					// Check if we mis the last chars
 					// If so this entry is oke
@@ -269,6 +282,8 @@ func (m *Matcher) Match(sentence string) int {
 						}
 					}
 				}
+
+				// Reset the m.InProgressMatches so we can scan for new words
 				m.InProgressMatches = m.InProgressMatches[:0]
 				beginWord = true
 				continue
@@ -276,8 +291,8 @@ func (m *Matcher) Match(sentence string) int {
 		}
 
 		if beginWord {
-			for _, path := range m.Paths {
-				if path.Letter == rLetter && sentenceLen-i-1 >= path.MustRemainingChars {
+			for _, path := range m.PathByLetter[rLetter] {
+				if sentenceLen-i-1 >= path.MustRemainingChars {
 					sentence := &m.Sentences[path.Sentence]
 					word := &sentence.Words[path.Word]
 

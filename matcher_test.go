@@ -134,3 +134,45 @@ func TestMatching(t *testing.T) {
 		a.Equal(t, testCase.matches, matcher.Match(testCase.input), testCase.input)
 	}
 }
+
+func BenchmarkMatch(b *testing.B) {
+	// Old
+	// BenchmarkMatch-12    	  1674688	      691.3 ns/op	       0 B/op	       0 allocs/op
+	// New
+	// BenchmarkMatch-12    	  859974	      1268 ns/op	       0 B/op	       0 allocs/op
+	// BenchmarkMatch-12    	  1067924	      1114 ns/op	       0 B/op	       0 allocs/op
+
+	matcher := NewMatcher(
+		"I love trees",
+		"bananas are the best fruit",
+		"banana",
+	)
+
+	matchesWith := []string{
+		"nothing",
+		"i love trees",
+		"bananas are the best fruit",
+		"banana",
+		"do you also love trees? i do.",
+		"on a sunday afternoon i like to eat a banana",
+	}
+
+	// f, err := os.Create("cpu.profile")
+	// a.NoError(b, err)
+
+	// err = pprof.StartCPUProfile(f)
+	// a.NoError(b, err)
+
+	b.ResetTimer()
+
+	total := b.N * b.N * b.N
+	for i := 0; i < total; i++ {
+		for _, v := range matchesWith {
+			matcher.Match(v)
+		}
+	}
+
+	// pprof.StopCPUProfile()
+	// f.Close()
+	// the profile can be inspected using: go tool pprof -http localhost:3333 cpu.profile
+}
