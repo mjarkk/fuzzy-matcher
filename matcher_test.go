@@ -1,6 +1,8 @@
 package fuzzymatcher
 
 import (
+	"os"
+	"runtime/pprof"
 	"testing"
 
 	a "github.com/stretchr/testify/assert"
@@ -55,8 +57,8 @@ func TestNewMatcher(t *testing.T) {
 }
 
 func TestSimpleMatch(t *testing.T) {
-	// a.Equal(t, 0, NewMatcher("foo").Match("foo"))
-	// a.Equal(t, -1, NewMatcher("foo").Match("bar"))
+	a.Equal(t, 0, NewMatcher("foo").Match("foo"))
+	a.Equal(t, -1, NewMatcher("foo").Match("bar"))
 
 	a.Equal(t, -1, NewMatcher("Voeger").Match("bedrijfsleider voedingsmiddelenindustrie"))
 }
@@ -136,16 +138,18 @@ func TestMatching(t *testing.T) {
 }
 
 func BenchmarkMatch(b *testing.B) {
-	// Old
-	// BenchmarkMatch-12    	  1674688	      691.3 ns/op	       0 B/op	       0 allocs/op
-	// New
-	// BenchmarkMatch-12    	  859974	      1268 ns/op	       0 B/op	       0 allocs/op
-	// BenchmarkMatch-12    	  1067924	      1114 ns/op	       0 B/op	       0 allocs/op
+	// With chinese characters in the NewMatcher input
+	// BenchmarkMatch-12    	  703314	      1464 ns/op	      24 B/op	       3 allocs/op
+	// BenchmarkMatch-12    	  771780	      1404 ns/op	       0 B/op	       0 allocs/op
+
+	// Without chinese characters in the NewMatcher input
+	// BenchmarkMatch-12    	  871885	      1388 ns/op	       0 B/op	       0 allocs/op
 
 	matcher := NewMatcher(
 		"I love trees",
 		"bananas are the best fruit",
 		"banana",
+		"我 在 和",
 	)
 
 	matchesWith := []string{
@@ -155,24 +159,27 @@ func BenchmarkMatch(b *testing.B) {
 		"banana",
 		"do you also love trees? i do.",
 		"on a sunday afternoon i like to eat a banana",
+		"aa bb cc dd ee ff gg hh ii jj kk ll mm nn oo pp qq rr ss tt uu vv ww xx yy zz",
+		"我 在 和",
 	}
 
-	// f, err := os.Create("cpu.profile")
-	// a.NoError(b, err)
+	f, err := os.Create("cpu.profile")
+	a.NoError(b, err)
 
-	// err = pprof.StartCPUProfile(f)
-	// a.NoError(b, err)
+	err = pprof.StartCPUProfile(f)
+	a.NoError(b, err)
 
 	b.ResetTimer()
 
-	total := b.N * b.N * b.N
+	// total := b.N * b.N * b.N
+	total := b.N
 	for i := 0; i < total; i++ {
 		for _, v := range matchesWith {
 			matcher.Match(v)
 		}
 	}
 
-	// pprof.StopCPUProfile()
-	// f.Close()
+	pprof.StopCPUProfile()
+	f.Close()
 	// the profile can be inspected using: go tool pprof -http localhost:3333 cpu.profile
 }

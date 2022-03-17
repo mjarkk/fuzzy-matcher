@@ -111,8 +111,10 @@ type Matcher struct {
 	Sentences []sentenceT
 
 	// the fields below are generated with the (*Matcher).complete() method
-	Paths        []pathToWord
-	PathByLetter map[rune][]pathToWord
+	Paths                []pathToWord
+	HasPathsWithRuneSelf bool                        // basicly tells if there are complex utf8 chars
+	PathByLetterMap      map[rune][]pathToWord       // Use if HasPathsWithRuneSelf == true
+	PathByLetterList     [utf8.RuneSelf][]pathToWord // Use if HasPathsWithRuneSelf == false
 
 	// Zero alloc cache
 	UTF8RuneCreation  []byte
@@ -121,19 +123,28 @@ type Matcher struct {
 
 func (m *Matcher) complete() {
 	m.Paths = []pathToWord{}
-	m.PathByLetter = map[rune][]pathToWord{}
+	m.PathByLetterMap = map[rune][]pathToWord{}
+	m.PathByLetterList = [utf8.RuneSelf][]pathToWord{}
 
 	for idx, sentence := range m.Sentences {
 		for _, path := range sentence.Paths {
 			path.Sentence = idx
 
+			letter := path.Letter
+
 			m.Paths = append(m.Paths, path)
-			list, ok := m.PathByLetter[path.Letter]
+			list, ok := m.PathByLetterMap[letter]
 			// Add the path to a specific paths list or create a new paths list
 			if !ok {
-				m.PathByLetter[path.Letter] = []pathToWord{path}
+				m.PathByLetterMap[letter] = []pathToWord{path}
 			} else {
-				m.PathByLetter[path.Letter] = append(list, path)
+				m.PathByLetterMap[letter] = append(list, path)
+			}
+
+			if letter < utf8.RuneSelf {
+				m.PathByLetterList[letter] = append(m.PathByLetterList[letter], path)
+			} else {
+				m.HasPathsWithRuneSelf = true
 			}
 		}
 	}
@@ -236,7 +247,13 @@ func (m *Matcher) Match(sentence string) int {
 		}
 
 		if letter >= utf8.RuneSelf {
+			if beginWord && !m.HasPathsWithRuneSelf {
+				// There are not even words starting with this letter, lets skip this one
+				beginWord = false
+				continue
+			}
 			if !beginWord && len(m.InProgressMatches) == 0 {
+				// We are matching nothing on the current word, no need to execute heavy instructions
 				continue
 			}
 
@@ -291,7 +308,14 @@ func (m *Matcher) Match(sentence string) int {
 		}
 
 		if beginWord {
-			for _, path := range m.PathByLetter[rLetter] {
+			var paths []pathToWord
+			if !m.HasPathsWithRuneSelf || rLetter < utf8.RuneSelf {
+				paths = m.PathByLetterList[rLetter]
+			} else {
+				paths = m.PathByLetterMap[rLetter]
+			}
+
+			for _, path := range paths {
 				if sentenceLen-i-1 >= path.MustRemainingChars {
 					sentence := &m.Sentences[path.Sentence]
 					word := &sentence.Words[path.Word]
@@ -326,7 +350,6 @@ func (m *Matcher) Match(sentence string) int {
 
 					entry.WordOffset += offset + 1
 					entry.SkippedChars += offset
-
 					if entry.WordOffset == len(entry.Word.FuzzyLettersOrder) {
 						// Completed matching this word
 						res := entry.addWordIdxToSentence()
