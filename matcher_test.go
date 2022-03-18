@@ -102,6 +102,8 @@ func TestMatching(t *testing.T) {
 		{"banana", "apple", false},
 		{"bananen lekker", "bananen zijn vies", false},
 		{"Metselaar", "slijterij", false},
+		{"fòÓôÕöl", "foooool", true},
+		{"foooool", "fòÓôÕöl", true},
 	}
 
 	for _, testCase := range testCases {

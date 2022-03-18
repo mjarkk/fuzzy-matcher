@@ -183,15 +183,17 @@ func NewMatcher(sentences ...string) *Matcher {
 			if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
 				word.Letters = append(word.Letters, c)
 			} else if c >= 'A' && c <= 'Z' {
-				c += upperToLowerCaseOffset
-				word.Letters = append(word.Letters, c)
+				word.Letters = append(word.Letters, c+upperToLowerCaseOffset)
 			} else {
 				switch c {
 				case ' ', '\t', '\n', '\r':
 					commitWord()
 				default:
 					if c >= utf8.RuneSelf {
-						word.Letters = append(word.Letters, c)
+						newC, ok := checkAndCorredUnicodeChar(c)
+						if ok {
+							word.Letters = append(word.Letters, newC)
+						}
 					}
 				}
 			}
@@ -264,15 +266,15 @@ func (m *Matcher) Match(sentence string) int {
 			case sentenceLen - 2:
 				r, size := utf8.DecodeRune(append(m.UTF8RuneCreation[:0], letter, sentence[i+1]))
 				i += size - 1
-				rLetter = r
+				rLetter, _ = checkAndCorredUnicodeChar(r)
 			case sentenceLen - 3:
 				r, size := utf8.DecodeRune(append(m.UTF8RuneCreation[:0], letter, sentence[i+1], sentence[i+2]))
 				i += size - 1
-				rLetter = r
+				rLetter, _ = checkAndCorredUnicodeChar(r)
 			default:
 				r, size := utf8.DecodeRune(append(m.UTF8RuneCreation[:0], letter, sentence[i+1], sentence[i+2], sentence[i+3]))
 				i += size - 1
-				rLetter = r
+				rLetter, _ = checkAndCorredUnicodeChar(r)
 			}
 			if rLetter == utf8.RuneError {
 				continue
@@ -390,4 +392,64 @@ func (m *Matcher) Match(sentence string) int {
 	}
 
 	return -1
+}
+
+func checkAndCorredUnicodeChar(c rune) (rune, bool) {
+	switch c {
+	case 'à', 'À', 'á', 'Á', 'â', 'Â', 'ã', 'Ã', 'ä', 'Ä', 'å', 'Å', 'æ', 'Æ':
+		return 'a', true
+	case 'è', 'È', 'é', 'É', 'ê', 'Ê', 'ë', 'Ë':
+		return 'e', true
+	case 'ì', 'Ì', 'í', 'Í', 'î', 'Î', 'ï', 'Ï':
+		return 'i', true
+	case 'ò', 'Ò', 'ó', 'Ó', 'ô', 'Ô', 'õ', 'Õ', 'ö', 'Ö', 'ð', 'Ð', 'ø', 'Ø':
+		return 'o', true
+	case 'ù', 'Ù', 'ú', 'Ú', 'û', 'Û', 'ü', 'Ü':
+		return 'u', true
+	case 'ß':
+		return 's', true
+	case 'ñ', 'Ñ':
+		return 'n', true
+	case 'ý', 'Ý', 'ÿ', 'Ÿ':
+		return 'y', true
+	case 'ç', 'Ç':
+		return 'c', true
+	case '©':
+		return 'c', true
+	case '®':
+		return 'r', true
+	case 768, // accent of: à
+		769, // accent of: á
+		770, // accent of: â
+		771, // accent of: ã
+		776, // accent of: ä
+		778, // accent of: å
+		'¿',
+		'¡',
+		0x2002, // En space
+		0x2003, // Em space
+		0x2004, // Three-per-em space
+		0x2005, // Four-per-em space
+		0x2006, // Six-per-em space
+		0x2007, // Figure space
+		0x2008, // Punctuation space
+		0x2009, // Thin space
+		0x200A, // Hair space
+		0x200B, // Zero width space
+		0x202F, // Narrow no-break space
+		0x205F, // Medium mathematical space
+		0x3000, // Ideographic space
+		'“',
+		'”',
+		'’',
+		'‵',
+		'‹',
+		'›',
+		'»',
+		'«',
+		utf8.RuneError:
+		return utf8.RuneError, false
+	default:
+		return c, true
+	}
 }
