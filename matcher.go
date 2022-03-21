@@ -184,18 +184,13 @@ func NewMatcher(sentences ...string) *Matcher {
 				word.Letters = append(word.Letters, c)
 			} else if c >= 'A' && c <= 'Z' {
 				word.Letters = append(word.Letters, c+upperToLowerCaseOffset)
-			} else {
-				switch c {
-				case ' ', '\t', '\n', '\r':
-					commitWord()
-				default:
-					if c >= utf8.RuneSelf {
-						newC, ok := checkAndCorredUnicodeChar(c)
-						if ok {
-							word.Letters = append(word.Letters, newC)
-						}
-					}
+			} else if c >= utf8.RuneSelf {
+				newC, ok := checkAndCorredUnicodeChar(c)
+				if ok {
+					word.Letters = append(word.Letters, newC)
 				}
+			} else {
+				commitWord()
 			}
 		}
 		commitWord()
