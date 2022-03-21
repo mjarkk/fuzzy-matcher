@@ -1,6 +1,7 @@
 package fuzzymatcher
 
 import (
+	"fmt"
 	"unicode/utf8"
 )
 
@@ -289,7 +290,7 @@ func (m *Matcher) Match(sentence string) int {
 					// Check if we mis the last chars
 					// If so this entry is oke
 					// Makes sure "banan" can match "banana"
-					if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
+					if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset <= entry.Word.allowedOffset-entry.SkippedChars {
 						res := entry.addWordIdxToSentence()
 						if res != -1 {
 							return res
@@ -299,6 +300,7 @@ func (m *Matcher) Match(sentence string) int {
 
 				// Reset the m.InProgressMatches so we can scan for new words
 				m.InProgressMatches = m.InProgressMatches[:0]
+				fmt.Println("here 3")
 				beginWord = true
 				continue
 			}
@@ -313,7 +315,7 @@ func (m *Matcher) Match(sentence string) int {
 			}
 
 			for _, path := range paths {
-				if sentenceLen-i-1 >= path.MustRemainingChars {
+				if sentenceLen-i >= path.MustRemainingChars {
 					sentence := &m.Sentences[path.Sentence]
 					word := &sentence.Words[path.Word]
 
@@ -354,6 +356,7 @@ func (m *Matcher) Match(sentence string) int {
 							return res
 						}
 						m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
+						fmt.Println("here 2")
 					} else {
 						m.InProgressMatches[i] = entry
 					}
@@ -370,6 +373,7 @@ func (m *Matcher) Match(sentence string) int {
 				m.InProgressMatches[i] = entry
 			} else {
 				m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
+				fmt.Println("here 1")
 			}
 		}
 	}
@@ -378,7 +382,7 @@ func (m *Matcher) Match(sentence string) int {
 		// Check if we mis the last chars
 		// If so this entry is oke
 		// Makes sure "banan" can match "banana"
-		if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset-1 <= entry.Word.allowedOffset-entry.SkippedChars {
+		if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset <= entry.Word.allowedOffset-entry.SkippedChars {
 			res := entry.addWordIdxToSentence()
 			if res != -1 {
 				return res
