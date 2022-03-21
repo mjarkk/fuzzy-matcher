@@ -1,7 +1,6 @@
 package fuzzymatcher
 
 import (
-	"fmt"
 	"unicode/utf8"
 )
 
@@ -300,7 +299,6 @@ func (m *Matcher) Match(sentence string) int {
 
 				// Reset the m.InProgressMatches so we can scan for new words
 				m.InProgressMatches = m.InProgressMatches[:0]
-				fmt.Println("here 3")
 				beginWord = true
 				continue
 			}
@@ -356,7 +354,6 @@ func (m *Matcher) Match(sentence string) int {
 							return res
 						}
 						m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
-						fmt.Println("here 2")
 					} else {
 						m.InProgressMatches[i] = entry
 					}
@@ -373,7 +370,6 @@ func (m *Matcher) Match(sentence string) int {
 				m.InProgressMatches[i] = entry
 			} else {
 				m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
-				fmt.Println("here 1")
 			}
 		}
 	}
