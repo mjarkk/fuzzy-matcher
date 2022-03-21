@@ -289,7 +289,7 @@ func (m *Matcher) Match(sentence string) int {
 					// Check if we mis the last chars
 					// If so this entry is oke
 					// Makes sure "banan" can match "banana"
-					if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset <= entry.Word.allowedOffset-entry.SkippedChars {
+					if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset <= entry.Word.allowedOffset-entry.SkippedChars-1 {
 						res := entry.addWordIdxToSentence()
 						if res != -1 {
 							return res
@@ -378,7 +378,7 @@ func (m *Matcher) Match(sentence string) int {
 		// Check if we mis the last chars
 		// If so this entry is oke
 		// Makes sure "banan" can match "banana"
-		if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset <= entry.Word.allowedOffset-entry.SkippedChars {
+		if len(entry.Word.FuzzyLettersOrder)-entry.WordOffset <= entry.Word.allowedOffset-entry.SkippedChars-1 {
 			res := entry.addWordIdxToSentence()
 			if res != -1 {
 				return res
