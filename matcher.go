@@ -341,7 +341,7 @@ func (m *Matcher) Match(sentence string) int {
 			entry := m.InProgressMatches[i]
 			for offset, c := range entry.Word.FuzzyLettersOrder[entry.WordOffset] {
 				if c == rLetter {
-					if offset > 0 && offset > entry.Word.allowedOffset-entry.SkippedChars {
+					if offset > 0 && offset >= entry.Word.allowedOffset-entry.SkippedChars {
 						continue
 					}
 
