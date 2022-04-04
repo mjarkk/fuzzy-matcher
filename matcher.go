@@ -169,7 +169,7 @@ func NewMatcher(sentences ...string) *Matcher {
 
 		word := wordEntry{WordIdx: 1}
 		commitWord := func() {
-			if len(word.Letters) <= 1 {
+			if len(word.Letters) == 0 {
 				// Just reset the current word
 				word = wordEntry{WordIdx: word.WordIdx}
 			} else {
@@ -339,6 +339,11 @@ func (m *Matcher) Match(sentence string) int {
 	outer:
 		for i := len(m.InProgressMatches) - 1; i >= 0; i-- {
 			entry := m.InProgressMatches[i]
+			if entry.Word.len == 1 {
+				m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
+				continue
+			}
+
 			for offset, c := range entry.Word.FuzzyLettersOrder[entry.WordOffset] {
 				if c == rLetter {
 					if offset > 0 && offset >= entry.Word.allowedOffset-entry.SkippedChars {
@@ -407,9 +412,7 @@ func checkAndCorredUnicodeChar(c rune) (rune, bool) {
 		return 'n', true
 	case 'ý', 'Ý', 'ÿ', 'Ÿ':
 		return 'y', true
-	case 'ç', 'Ç':
-		return 'c', true
-	case '©':
+	case 'ç', 'Ç', '©':
 		return 'c', true
 	case '®':
 		return 'r', true
