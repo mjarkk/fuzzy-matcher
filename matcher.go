@@ -208,11 +208,12 @@ func NewMatcher(sentences ...string) *Matcher {
 }
 
 type inProgressMatch struct {
-	PathToWord   pathToWord
-	Word         *wordEntry
-	Sentence     *sentenceT
-	WordOffset   int
-	SkippedChars int
+	PathToWord    pathToWord
+	Word          *wordEntry
+	Sentence      *sentenceT
+	WordOffset    int
+	SkippedChars  int
+	NoMoreLetters bool
 }
 
 func (e *inProgressMatch) addWordIdxToSentence() int {
@@ -323,11 +324,12 @@ func (m *Matcher) Match(sentence string) int {
 					}
 
 					m.InProgressMatches = append(m.InProgressMatches, inProgressMatch{
-						PathToWord:   path,
-						Word:         word,
-						Sentence:     sentence,
-						WordOffset:   path.WordOffset,
-						SkippedChars: path.WordOffset,
+						PathToWord:    path,
+						Word:          word,
+						Sentence:      sentence,
+						WordOffset:    path.WordOffset,
+						SkippedChars:  path.WordOffset,
+						NoMoreLetters: word.len == 1,
 					})
 				}
 			}
@@ -339,34 +341,25 @@ func (m *Matcher) Match(sentence string) int {
 	outer:
 		for i := len(m.InProgressMatches) - 1; i >= 0; i-- {
 			entry := m.InProgressMatches[i]
-			if entry.Word.len == 1 {
-				m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
-				continue
-			}
-
-			for offset, c := range entry.Word.FuzzyLettersOrder[entry.WordOffset] {
-				if c == rLetter {
-					if offset > 0 && offset >= entry.Word.allowedOffset-entry.SkippedChars {
-						continue
-					}
-
-					entry.WordOffset += offset + 1
-					entry.SkippedChars += offset
-					if entry.WordOffset == len(entry.Word.FuzzyLettersOrder) {
-						// Completed matching this word
-						res := entry.addWordIdxToSentence()
-						if res != -1 {
-							return res
+			if !entry.NoMoreLetters {
+				for offset, c := range entry.Word.FuzzyLettersOrder[entry.WordOffset] {
+					if c == rLetter {
+						if offset > 0 && offset >= entry.Word.allowedOffset-entry.SkippedChars {
+							continue
 						}
-						m.InProgressMatches = append(m.InProgressMatches[:i], m.InProgressMatches[i+1:]...)
-					} else {
-						m.InProgressMatches[i] = entry
-					}
-					continue outer
-				}
 
-				if c == 0 {
-					break
+						entry.WordOffset += offset + 1
+						entry.SkippedChars += offset
+						if entry.WordOffset == len(entry.Word.FuzzyLettersOrder) {
+							entry.NoMoreLetters = true
+						}
+						m.InProgressMatches[i] = entry
+						continue outer
+					}
+
+					if c == 0 {
+						break
+					}
 				}
 			}
 
